@@ -1,39 +1,34 @@
 import os
 import telebot
 import pandas as pd
+import pymongo
 from telebot import types
 from threading import Thread
 from flask import Flask
 
-# Render ရဲ့ Port Health Check ကို ကျော်ဖြတ်ရန် Flask App ဆောက်ခြင်း
 app = Flask('')
 
 @app.route('/')
 def home():
-    return "Bot is alive and running!"
+    return "Bot is alive and running with MongoDB!"
 
 def run_flask():
-    # Render က ပေးမယ့် Port နံပါတ်ကို ယူခြင်း (မရှိရင် 5000 ကိုသုံးမည်)
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
 
-# Token များကို Render Environment Variables မှ လှမ်းယူခြင်း
+# Environment Variables များယူခြင်း
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 ADMIN_CHAT_ID = int(os.environ.get('ADMIN_CHAT_ID', '0'))
+MONGO_URI = os.environ.get('MONGO_URI')  # MongoDB Connection String
+
+# MongoDB ချိတ်ဆက်ခြင်း
+client = pymongo.MongoClient(MONGO_URI)
+db = client['student_database']       # Database နာမည်
+collection = db['students_records']   # Table (Collection) နာမည်
 
 bot = telebot.TeleBot(BOT_TOKEN)
 user_data = {}
-EXCEL_FILE = "students_data.xlsx"
-
-def init_excel():
-    if not os.path.exists(EXCEL_FILE):
-        df = pd.DataFrame(columns=[
-            "Telegram Chat ID", "ကျောင်းသား ID (KPTMYK)", "ကျောင်းသားအမည်", 
-            "၁၀တန်းအောင်ခုနှစ်", "စာမေးပွဲဌာန", "၁၀တန်းခုံအမှတ်", 
-            "အုပ်ထိန်းသူ ဖုန်းနံပါတ်", "အမှတ်ပေါင်း (စုစုပေါင်း)", 
-            "English", "Mathematics", "Physics", "Chemistry", "၄ ဘာသာပေါင်းရလဒ်"
-        ])
-        df.to_excel(EXCEL_FILE, index=False)
+TEMP_EXCEL_FILE = "students_data1.xlsx"
 
 @bot.message_handler(func=lambda message: message.text not in ['/start', '\\start', '/download'] and message.chat.id not in user_data)
 def welcome_message(message):
@@ -60,7 +55,7 @@ def process_student_id(message):
 def process_student_name(message):
     chat_id = message.chat.id
     user_data[chat_id]['student_name'] = message.text
-    msg = bot.send_message(chat_id, "သင်၏ **၁၀တန်းအောင်ခုနှစ်** (ဥပမာ - 20__ - 20__ )ကို ရိုက်ထည့်ပေးပါရန်။")
+    msg = bot.send_message(chat_id, "သင်၏ **၁၀တန်းအောင်ခုနှစ်** (ဥပမာ - 20__ -20__ )ကို ရိုက်ထည့်ပေးပါရန်။")
     bot.register_next_step_handler(msg, process_passing_year)
 
 def process_passing_year(message):
@@ -153,8 +148,8 @@ def handle_query(call):
         return
 
     if call.data == "confirm_save":
-        init_excel()
-        new_row = {            
+        # Data များကို MongoDB ထဲသို့ သိမ်းဆည်းခြင်း
+        new_row = {
             "ကျောင်းသား ID (KPTMYK)": user_data[chat_id]['student_id'],
             "ကျောင်းသားအမည်": user_data[chat_id]['student_name'],
             "၁၀တန်းအောင်ခုနှစ်": user_data[chat_id]['passing_year'],
@@ -168,14 +163,14 @@ def handle_query(call):
             "Chemistry": user_data[chat_id]['chem'],
             "၄ ဘာသာပေါင်းရလဒ်": user_data[chat_id]['four_subjects_total']
         }
-        df = pd.read_excel(EXCEL_FILE)
-        df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
-        df.to_excel(EXCEL_FILE, index=False)
+        
+        # MongoDB သို့ Insert လုပ်ခြင်း
+        collection.insert_one(new_row)
         
         bot.edit_message_text(
             chat_id=chat_id, 
             message_id=call.message.message_id, 
-            text=f"✅ သင်၏ အချက်အလက်များကို အောင်မြင်စွာ သိမ်းဆည်းပြီးပါပြီ။\n🎯 ၄ ဘာသာပေါင်းရလဒ်: **{user_data[chat_id]['four_subjects_total']} မှတ်**\n\nကျေးဇူးတင်ပါတယ်!",
+            text=f"✅ သင်၏ အချက်အလက်များကို Database ထဲသို့ လုံခြုံစွာ သိမ်းဆည်းပြီးပါပြီ။\n🎯 ၄ ဘာသာပေါင်းရလဒ်: **{user_data[chat_id]['four_subjects_total']} မှတ်**\n\nကျေးဇူးတင်ပါတယ်!",
             parse_mode="Markdown"
         )
         del user_data[chat_id]
@@ -184,21 +179,33 @@ def handle_query(call):
         bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text="🔄 အချက်အလက်များကို အစမှ ပြန်လည်ဖြည့်စွက်ပေးပါ။")
         start_form(call.message)
 
+# Admin က /download ဟု တောင်းဆိုချိန်တွင် MongoDB မှ data များကို ဆွဲထုတ်ပြီး Excel ပြောင်းပေးခြင်း
 @bot.message_handler(commands=['download'])
 def download_excel(message):
     if message.chat.id == ADMIN_CHAT_ID:
-        if os.path.exists(EXCEL_FILE):
-            with open(EXCEL_FILE, 'rb') as file:
-                bot.send_document(message.chat.id, file, caption="📊 ကျောင်းသားစာရင်း Excel File ဖြစ်ပါတယ်။")
+        # Database ထဲမှ Data များအားလုံး ယူခြင်း (_id ကို ဖယ်ထုတ်ထားပါသည်)
+        data = list(collection.find({}, {"_id": 0}))
+        
+        if data:
+            # Pandas ဖြင့် Excel ဖိုင်အဖြစ် ချက်ချင်းပြောင်းလဲခြင်း
+            df = pd.DataFrame(data)
+            df.to_excel(TEMP_EXCEL_FILE, index=False)
+            
+            # သင့်ဆီသို့ Excel ပို့ပေးခြင်း
+            with open(TEMP_EXCEL_FILE, 'rb') as file:
+                bot.send_document(message.chat.id, file, caption="📊 MongoDB Database မှ ထုတ်ယူထားသော နောက်ဆုံးရ ကျောင်းသားစာရင်း Excel File ဖြစ်ပါတယ်။")
+            
+            # ပို့ပြီးရင် Server ထဲက ယာယီဖိုင်ကို ပြန်ဖျက်ခြင်း
+            if os.path.exists(TEMP_EXCEL_FILE):
+                os.remove(TEMP_EXCEL_FILE)
         else:
-            bot.send_message(message.chat.id, "❌ သိမ်းဆည်းထားတဲ့ Data မရှိသေးပါ။")
+            bot.send_message(message.chat.id, "❌ Database ထဲမှာ မည်သည့်ကျောင်းသား Data မှ မရှိသေးပါဘူးခင်ဗျာ။")
     else:
         bot.send_message(message.chat.id, "🚫 သင်သည် Admin မဟုတ်ပါ။")
 
 if __name__ == "__main__":
-    # Flask ကို Thread ဖြင့် နောက်ကွယ်တွင် ပူးတွဲ Run ခြင်း
     t = Thread(target=run_flask)
     t.start()
     
-    print("Bot is running...")
+    print("Bot is running with MongoDB...")
     bot.infinity_polling()
