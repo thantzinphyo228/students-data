@@ -2,3 +2,5 @@ pyTelegramBotAPI
 pandas
 openpyxl
 flask
+pymongo
+dnspython
