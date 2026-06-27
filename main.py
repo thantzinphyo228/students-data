@@ -148,8 +148,9 @@ def handle_query(call):
         return
 
     if call.data == "confirm_save":
-        # Data များကို MongoDB ထဲသို့ သိမ်းဆည်းခြင်း
+        # သိမ်းဆည်းမည့် Data ပုံစံ
         new_row = {
+            
             "ကျောင်းသား ID (KPTMYK)": user_data[chat_id]['student_id'],
             "ကျောင်းသားအမည်": user_data[chat_id]['student_name'],
             "၁၀တန်းအောင်ခုနှစ်": user_data[chat_id]['passing_year'],
@@ -164,16 +165,27 @@ def handle_query(call):
             "၄ ဘာသာပေါင်းရလဒ်": user_data[chat_id]['four_subjects_total']
         }
         
-        # MongoDB သို့ Insert လုပ်ခြင်း
-        collection.insert_one(new_row)
-        
-        bot.edit_message_text(
-            chat_id=chat_id, 
-            message_id=call.message.message_id, 
-            text=f"✅ သင်၏ အချက်အလက်များကို Database ထဲသို့ လုံခြုံစွာ သိမ်းဆည်းပြီးပါပြီ။\n🎯 ၄ ဘာသာပေါင်းရလဒ်: **{user_data[chat_id]['four_subjects_total']} မှတ်**\n\nကျေးဇူးတင်ပါတယ်!",
-            parse_mode="Markdown"
-        )
-        del user_data[chat_id]
+        # ⚠️ အမှားအယွင်းရှာဖွေရန် try-except စနစ်ထည့်သွင်းခြင်း
+        try:
+            # MongoDB သို့ Insert လုပ်ခြင်း
+            collection.insert_one(new_row)
+            
+            # အောင်မြင်လျှင် ပြသမည့်စာသား
+            bot.edit_message_text(
+                chat_id=chat_id, 
+                message_id=call.message.message_id, 
+                text=f"✅ သင်၏ အချက်အလက်များကို Database ထဲသို့ လုံခြုံစွာ သိမ်းဆည်းပြီးပါပြီ။\n🎯 ၄ ဘာသာပေါင်းရလဒ်: **{user_data[chat_id]['four_subjects_total']} မှတ်**\n\nကျေးဇူးတင်ပါတယ်!",
+                parse_mode="Markdown"
+            )
+            del user_data[chat_id]
+            
+        except Exception as error_msg:
+            # ❌ အကယ်၍ MongoDB သို့ သိမ်းမရပါက ဘာကြောင့်လဲဆိုသည့် Error ကို ကျောင်းသား/သင့်ထံ တိုက်ရိုက် စာပို့ပေးမည်
+            bot.send_message(
+                chat_id, 
+                f"❌ **Database သို့ Data သိမ်းဆည်း၍ မရပါတကား!**\n\n**Error အကြောင်းရင်း:**\n`{str(error_msg)}`", 
+                parse_mode="Markdown"
+            )
 
     elif call.data == "restart_form":
         bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text="🔄 အချက်အလက်များကို အစမှ ပြန်လည်ဖြည့်စွက်ပေးပါ။")
